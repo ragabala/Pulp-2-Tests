@@ -5,7 +5,7 @@ from urllib.parse import urljoin
 
 from pulp_smash import api, config, selectors
 from pulp_smash.pulp2.constants import REPOSITORY_PATH
-from pulp_smash.pulp2.utils import sync_repo
+from pulp_smash.pulp2.utils import sync_repo, search_units
 
 from pulp_2_tests.constants import DOCKER_V1_FEED_URL, DOCKER_V2_FEED_URL
 from pulp_2_tests.tests.docker.api_v2.utils import gen_repo
@@ -125,6 +125,51 @@ class CopyV2ContentTestCase(unittest.TestCase):
         )
 
     @skip_if(bool, 'repo', False)
+    def test_02_copy_tags_user_metadata(self):
+        """Copy tags from one repository to another.
+
+        Assert the user metadata associated with one tag is copied.
+
+        Steps:
+
+        1. Add user metadata to the first tag in the source repo.
+        2. Copy the tag from one repo to the other.
+        3. Verify that the user_metadata is copied to the repo.
+
+        This test targets the following
+
+        * `Pulp #3242 <https://pulp.plan.io/issues/3242>`_.
+        * `Pulp-2-tests #72 <https://github.com/PulpQE/Pulp-2-Tests/issues/72>`_.
+        """
+        if not selectors.bug_is_fixed(3892, self.cfg.pulp_version):
+            self.skipTest('https://pulp.plan.io/issues/3892')
+        client = api.Client(self.cfg, api.json_handler)
+
+        # Step 1
+        tag = search_units(self.cfg, self.repo, {'type_ids': ['docker_tag']})[0]
+        user_metadata = {
+            "user_key_dummy": "A",
+            "user_key_dummy_2": "B",
+        }
+        type(self)._set_user_metadata(client, tag, user_metadata)
+
+        # Step 2
+        repo = client.post(REPOSITORY_PATH, gen_repo())
+        self.addCleanup(client.delete, repo['_href'])
+        client.post(urljoin(repo['_href'], 'actions/associate/'), {
+            'source_repo_id': self.repo['id'],
+            'criteria': {'filters': {}, 'type_ids': ['docker_tag']},
+        })
+
+        units = search_units(self.cfg, self.repo, {
+                  'type_ids': ['docker_tag'],
+                  'filters': {'unit': {'_id': tag['unit_id']}},
+              })
+
+        #step 3
+        self.assertEqual(units['metadata']['pulp_user_metadata'], user_metadata , units)
+
+    @skip_if(bool, 'repo', False)
     def test_02_copy_manifests(self):
         """Copy manifests from one repository to another.
 
@@ -171,3 +216,9 @@ class CopyV2ContentTestCase(unittest.TestCase):
             self.repo['content_unit_counts']['docker_manifest_list'],
             repo['content_unit_counts'].get('docker_manifest_list', 0),
         )
+
+    @staticmethod
+    def _set_user_metadata(client, tag, content):
+        """Associate the docker tag to the given user metadata content."""
+        path = '/pulp/api/v2/content/units/{}/{}/pulp_user_metadata/'.format(tag['unit_type_id'], tag['unit_id'])
+        client.put(path, content)
