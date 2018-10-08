@@ -56,6 +56,7 @@ from pulp_smash.pulp2.utils import (
 from requests.exceptions import HTTPError
 
 from pulp_2_tests.constants import (
+    ERRATA_UPDATE_INFO,
     OPENSUSE_FEED_URL,
     RPM,
     RPM_DATA,
@@ -663,3 +664,128 @@ class OpenSuseErrataTestCase(unittest.TestCase):
         """
         updated = self.updates_element.findall('update/updated')
         self.assertEqual(len(updated), 0, updated)
+
+
+class UpdateErrataTestCase(unittest.TestCase):
+    """Test updating Errata and uploading."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Create ``Client`` and ``Config`` object for tests."""
+        cls.cfg = config.get_config()
+        cls.client = api.Client(cls.cfg, api.json_handler)
+
+    def test_all(self):
+        """Verify whether only proper newer Erratas with same Id gets updated.
+
+        This test targets the following issue:
+        * `Pulp #858 <https://pulp.plan.io/issues/858>`_
+        * `Pulp-2-Tests #92 <https://github.com/PulpQE/pulp-smash/issues/92>`_
+
+        This test covers the three scenarios:
+
+        1. The erratum is updated if ``updated date`` field indicates
+           that the synced or uploaded erratum is newer.
+        2. The erratum is not updated if ``updated date`` field indicates
+           that the synced or uploaded erratum is older.
+        3. The erratum is not updated if ``updated date`` field of either
+           the existing erratum or the newly synced/uploaded erratum
+           is in the wrong format (task will fail in this case).
+
+        Do the following:
+
+        1. Create and Sync a repo with a feed url of
+           ``pulp_2_tests.constants.RPM_UNSIGNED_FEED_URL``
+        2. Download the errata file. Modify it and change its ``updated``
+           field.
+        3. Check whether it got updated or not according to the three scenarios
+           mentioned earlier.
+        """
+        # scenario 1
+        with self.subTest(comment='Verify Scenario 1.'):
+            units = self._do_test(ERRATA_UPDATE_INFO['new_updated_date'])
+            self.assertEqual(
+                units[0]['metadata']['updated'],
+                ERRATA_UPDATE_INFO['new_updated_date'],
+                units
+            )
+            self.assertEqual(
+                units[0]['metadata']['description'],
+                ERRATA_UPDATE_INFO['updated_description'],
+                units
+            )
+
+        # scenario 2
+        with self.subTest(comment='Verify Scenario 2.'):
+            units = self._do_test(ERRATA_UPDATE_INFO['old_updated_date'])
+            self.assertNotEqual(
+                units[0]['metadata']['updated'],
+                ERRATA_UPDATE_INFO['old_updated_date'],
+                units
+            )
+            self.assertNotEqual(
+                units[0]['metadata']['description'],
+                ERRATA_UPDATE_INFO['updated_description'],
+                units
+            )
+
+        # scenario 3
+        with self.subTest(comment='Verify Scenario 3.'):
+            units = self._do_test(ERRATA_UPDATE_INFO['invalid_updated_date'])
+            self.assertNotEqual(
+                units[0]['metadata']['updated'],
+                ERRATA_UPDATE_INFO['invalid_updated_date'],
+                units
+            )
+            self.assertNotEqual(
+                units[0]['metadata']['description'],
+                ERRATA_UPDATE_INFO['updated_description'],
+                units
+            )
+
+    def _do_test(self, updated_date):
+        """Update errata with the passed ``update_field``.
+
+        This test targets the following issue:
+        * `Pulp #858 <https://pulp.plan.io/issues/858>`_
+        * `Pulp-2-Tests #92 <https://github.com/PulpQE/pulp-smash/issues/92>`_
+
+        Do the following:
+        1. Create and Sync a repo with a feed URL of
+        ``pulp_2_tests.constants.RPM_UNSIGNED_FEED_URL``.
+        2. Upload a modified Errata to the repo.
+        3. Return the errata info from the uploaded pulp repo.
+        """
+        # Step 1
+        body = gen_repo(
+            importer_config={'feed': RPM_UNSIGNED_FEED_URL},
+            distributors=[gen_distributor()]
+        )
+        repo = self.client.post(REPOSITORY_PATH, body)
+        self.addCleanup(self.client.delete, repo['_href'])
+        sync_repo(self.cfg, repo)
+        repo = self.client.get(repo['_href'], params={'details': True})
+
+        # Step 2
+        errata = {
+            'id': ERRATA_UPDATE_INFO['errata_id'],
+            'description': ERRATA_UPDATE_INFO['updated_description'],
+            'updated': updated_date,
+        }
+
+        upload_import_erratum(self.cfg, errata, repo)
+        repo = self.client.get(
+            repo['_href'],
+            params={'details': True}
+        )
+
+        repo = self.client.get(repo['_href'], params={'details': True})
+        criteria = {
+            'filters': {
+                'unit': {
+                    'id': ERRATA_UPDATE_INFO['errata_id']
+                }},
+            'type_ids': ['erratum']
+        }
+
+        return search_units(self.cfg, repo, criteria)

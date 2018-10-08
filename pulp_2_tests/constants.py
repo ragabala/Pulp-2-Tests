@@ -163,6 +163,14 @@ MODULE_FIXTURES_PACKAGE_STREAM = MappingProxyType({
 .. _modules.yaml: https://github.com/PulpQE/pulp-fixtures/blob/master/rpm/assets/modules.yaml
 """
 
+ERRATA_UPDATE_INFO = MappingProxyType({
+    'errata_id': 'RHEA-2012:0058',
+    'new_updated_date': '2014-07-28 00:00:00 UTC',
+    'old_updated_date': '2013-07-28 00:00:00 UTC',
+    'invalid_updated_date': '07-28-2014 00:00:00 UTC',
+    'updated_description': 'Gorilla_Erratum_Updated'
+})
+
 OPENSUSE_FEED_URL = 'https://download.opensuse.org/update/leap/42.3/oss/'
 """The URL to an openSUSE repository.
 
