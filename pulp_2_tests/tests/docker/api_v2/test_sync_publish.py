@@ -615,3 +615,53 @@ class RepoRegistryIdTestCase(SyncPublishMixin, unittest.TestCase):
         repos = client.get('/crane/repositories/v2')
         self.assertIn(repo_registry_id, repos.keys())
         self.assertFalse(repos[repo_registry_id]['protected'])
+
+
+class DownloadBlobsTestCase(SyncPublishMixin, unittest.TestCase):
+    """Sync a Docker repo manifest and download manifest blobs."""
+
+
+    @classmethod
+    def setUpClass(cls):
+        """Create class-wide variables."""
+        super().setUpClass()
+        cls.cfg = config.get_config()
+        if (os_is_f26(cls.cfg) and
+                not selectors.bug_is_fixed(3036, cls.cfg.pulp_version)):
+            raise unittest.SkipTest('https://pulp.plan.io/issues/3036')
+        for issue_id in (2287, 2384):
+            if not selectors.bug_is_fixed(issue_id, cls.cfg.pulp_version):
+                raise unittest.SkipTest(
+                    'https://pulp.plan.io/issues/{}'.format(issue_id)
+                )
+
+
+    def test_skip_download_blobs(self):
+        """Check whether the blobs of mediatype ``foreign`` are skipped.
+
+        This test does the following:
+
+        1. Create and sync a repo with Docker V2 Url and ``dmage`` upstream.
+        2. Get the manifests for the synced repo.
+        2. Test whether the sync doesn't download blobs of mediatype
+        as ``foreign``.
+
+        This test targets `Pulp #2847 <https://pulp.plan.io/issues/2847>`_.
+        """
+        repo = self.create_sync_publish_repo(self.cfg, {
+            'enable_v1': False,
+            'enable_v2': True,
+            'feed': DOCKER_V2_FEED_URL,
+            'upstream_name': get_upstream_name(self.cfg),
+        })
+        import ipdb;ipdb.set_trace()
+        client = api.Client(self.cfg, api.json_handler, {'headers': {
+            'accept': 'application/vnd.docker.distribution.manifest.v2+json'
+        }})
+        client.request_kwargs['url'] = self.adjust_url(
+            client.request_kwargs['url']
+        )
+
+        manifest = client.get(
+            '/v2/{}/manifests/latest'.format(repo['id'])
+        )
